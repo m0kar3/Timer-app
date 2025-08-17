@@ -12,7 +12,7 @@
   <style>
     .ring-bg { stroke-opacity: .15 }
     .time-shadow { text-shadow: 0 1px 0 rgba(0,0,0,.04); }
-    .scene-backdrop { position: fixed; inset: 0; z-index: 50; }
+    .scene-backdrop { position: fixed; inset: 0; background: white; z-index: 50; }
   </style>
 </head>
 <body class="bg-neutral-50">
@@ -22,60 +22,6 @@
     const { useEffect, useMemo, useRef, useState } = React;
 
     // ... [samme logikk som før, uendret] ...
-
-      // ===== Scene-modus =====
-      function SceneView() {
-        const bgColor = items[currentIdx]?.color || 'white';
-        return (
-          <div className="scene-backdrop p-6" style={{background:bgColor}}>
-            <div className="max-w-6xl mx-auto h-full grid place-items-center">
-              <div className="w-full grid md:grid-cols-3 gap-6 items-center">
-                <div className="md:col-span-2 p-6 rounded-2xl shadow bg-white/80 flex items-center justify-between" style={{background:bgColor}}>
-                  <div>
-                    <div className="text-sm uppercase tracking-wide text-neutral-600">Nå</div>
-                    <div className="text-4xl md:text-6xl font-semibold">{items[currentIdx]?.label || '—'}</div>
-                    {meetingMode && startTime && (
-                      <div className="text-lg text-neutral-700">Planlagt start: {plannedStartForIndex(currentIdx) || '—'}</div>
-                    )}
-                  </div>
-                  <div className="relative flex items-center justify-center" style={{width:240, height:240}}>
-                    <svg viewBox="0 0 240 240" width="240" height="240" className="block">
-                      {(() => { const R=96, CC=2*Math.PI*R; return (
-                        <>
-                          <circle cx="120" cy="120" r={R} stroke="currentColor" className="ring-bg" strokeWidth="14" fill="none"/>
-                          <circle cx="120" cy="120" r={R} stroke="currentColor" strokeWidth="14" fill="none"
-                            strokeLinecap="round"
-                            style={{ transform:'rotate(-90deg)', transformOrigin:'50% 50%', strokeDasharray: CC, strokeDashoffset: CC*(1-dash) }} />
-                        </>
-                      ); })()}
-                    </svg>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-6xl md:text-7xl font-mono tabular-nums time-shadow">{formatClock(remaining)}</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6 rounded-2xl shadow bg-white/80 flex flex-col gap-3 justify-between">
-                  <div>
-                    <div className="text-sm uppercase tracking-wide text-neutral-600">Neste</div>
-                    <div className="text-2xl font-medium">{items[currentIdx+1]?.label || '—'}</div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {!running ? (
-                      <button onClick={start} className="px-4 py-3 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
-                    ) : (
-                      <button onClick={pause} className="px-4 py-3 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
-                    )}
-                    <button onClick={nextItem} className="px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
-                    <button onClick={prevItem} className="px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
-                    <button onClick={reset} className="px-4 py-3 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
-                  </div>
-                  <button onClick={()=>setScene(false)} className="px-3 py-2 rounded-xl bg-neutral-100">Lukk scene-modus</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      }
 
             {/* Editor */}
             <div className="grid gap-3">
