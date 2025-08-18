@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agenda & Intervall‑Timer</title>
+  <title>Agenda & Intervall-Timer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://unpkg.com" />
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -12,7 +12,8 @@
   <style>
     .ring-bg { stroke-opacity: .15 }
     .time-shadow { text-shadow: 0 1px 0 rgba(0,0,0,.04); }
-    .scene-backdrop { position: fixed; inset: 0; background: white; z-index: 50; }
+    /* Viktig: ingen hardkodet hvit bakgrunn, fargen styres fra SceneView */
+    .scene-backdrop { position: fixed; inset: 0; z-index: 50; }
   </style>
 </head>
 <body class="bg-neutral-50">
@@ -21,11 +22,11 @@
   <script type="text/babel">
     const { useEffect, useMemo, useRef, useState } = React;
 
+    /* ---- Hjelpefunksjoner ---- */
     function uuid() {
       if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
       return 'id-' + Math.random().toString(36).slice(2) + Date.now();
     }
-
     function formatClock(totalSeconds) {
       const s = Math.max(0, Math.round(totalSeconds || 0));
       const mm = String(Math.floor(s / 60)).padStart(2, '0');
@@ -36,8 +37,6 @@
       const n = Math.max(min, Math.floor(Number(v) || 0));
       return typeof max === 'number' ? Math.min(n, max) : n;
     }
-
-    // Delt AudioContext for pip-lyd
     const audioCtxRefGlobal = { current: null };
     function ensureAudio() {
       try {
@@ -62,8 +61,9 @@
     function vibrate(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {} }
     function toSeconds(it) { return (Number(it?.minutes)||0)*60 + (Number(it?.seconds)||0); }
 
+    /* ---- App ---- */
     function App() {
-      // ===== Agendebok (flere møter/agendaer) =====
+      // Flere agendaer
       const [agendas, setAgendas] = useState(() => {
         try {
           const saved = JSON.parse(localStorage.getItem('ait-agendas')||'null');
@@ -77,10 +77,10 @@
           meetingMode: false,
           startTime: '',
           items: legacyItems && legacyItems.length ? legacyItems : [
-            { id: uuid(), label: 'Oppstart', minutes: 0, seconds: 30, color: '#fde68a' },
-            { id: uuid(), label: 'Sak 1', minutes: 0, seconds: 45, color: '#bbf7d0' },
-            { id: uuid(), label: 'Pause', minutes: 0, seconds: 15, color: '#bfdbfe' },
-            { id: uuid(), label: 'Evaluering', minutes: 0, seconds: 30, color: '#fca5a5' },
+            { id: uuid(), label: 'Oppstart',    minutes: 0, seconds: 30, color: '#fde68a' },
+            { id: uuid(), label: 'Sak 1',       minutes: 0, seconds: 45, color: '#bbf7d0' },
+            { id: uuid(), label: 'Pause',       minutes: 0, seconds: 15, color: '#bfdbfe' },
+            { id: uuid(), label: 'Evaluering',  minutes: 0, seconds: 30, color: '#fca5a5' },
           ]
         }];
       });
@@ -102,14 +102,13 @@
         setAgendas(nextAgendas);
         try { localStorage.setItem('ait-agendas', JSON.stringify(nextAgendas)); } catch {}
       }
-
       useEffect(() => {
         const next = agendas.map(a => a.id === activeAgendaId ? { ...a, items, meetingMode, startTime } : a);
         saveAgendas(next);
         try { localStorage.setItem('ait-items', JSON.stringify(items)); } catch {}
       }, [items, meetingMode, startTime]);
 
-      // ===== Timer (deadline-basert + sperre for dobbel next) =====
+      // Timer
       const [currentIdx, setCurrentIdx] = useState(0);
       const [remaining, setRemaining] = useState(() => toSeconds((active?.items||[])[0]));
       const [running, setRunning] = useState(false);
@@ -118,8 +117,8 @@
       const [muted, setMuted] = useState(false);
       const [scene, setScene] = useState(false);
 
-      const deadlineRef = useRef(null);   // ms timestamp
-      const advancingRef = useRef(false); // sperre
+      const deadlineRef = useRef(null);
+      const advancingRef = useRef(false);
 
       function startBlockForIndex(idx) {
         const dur = toSeconds(items[idx] || { minutes:0, seconds:0 });
@@ -150,16 +149,11 @@
         return () => cancelAnimationFrame(raf);
       }, [running, volume, vibrateOn, muted, items.length]);
 
-      function start() {
-        const now = performance.now();
-        deadlineRef.current = now + Math.max(0, remaining) * 1000;
-        advancingRef.current = false;
-        setRunning(true);
-      }
-      function pause() { setRunning(false); }
-      function reset() { setRunning(false); setCurrentIdx(0); startBlockForIndex(0); }
-      function nextItem() { setCurrentIdx(i => Math.min(items.length - 1, i + 1)); }
-      function prevItem() { setCurrentIdx(i => Math.max(0, i - 1)); }
+      function start()  { const now = performance.now(); deadlineRef.current = now + Math.max(0, remaining) * 1000; advancingRef.current = false; setRunning(true); }
+      function pause()  { setRunning(false); }
+      function reset()  { setRunning(false); setCurrentIdx(0); startBlockForIndex(0); }
+      function nextItem(){ setCurrentIdx(i => Math.min(items.length - 1, i + 1)); }
+      function prevItem(){ setCurrentIdx(i => Math.max(0, i - 1)); }
 
       const totalSeconds = useMemo(() => items.reduce((s, it) => s + toSeconds(it), 0), [items]);
       const elapsedSeconds = useMemo(() => {
@@ -181,7 +175,7 @@
         return d.toTimeString().slice(0,5);
       }
 
-      // ===== Agendahåndtering =====
+      // Agendahåndtering
       function newAgenda() {
         const name = prompt('Navn på ny agenda?', 'Ny agenda');
         if (!name) return;
@@ -226,13 +220,14 @@
         }; reader.readAsText(file);
       }
 
-      // ===== Scene-modus =====
+      /* ---- Scene-modus ---- */
       function SceneView() {
+        const bg = items[currentIdx]?.color || '#ffffff';
         return (
-          <div className="scene-backdrop p-6">
+          <div className="scene-backdrop p-6" style={{ background: bg }}>
             <div className="max-w-6xl mx-auto h-full grid place-items-center">
               <div className="w-full grid md:grid-cols-3 gap-6 items-center">
-                <div className="md:col-span-2 p-6 rounded-2xl shadow bg-white flex items-center justify-between" style={{background:(items[currentIdx]?.color||'white')}}>
+                <div className="md:col-span-2 p-6 rounded-2xl shadow bg-white/90 flex items-center justify-between">
                   <div>
                     <div className="text-sm uppercase tracking-wide text-neutral-600">Nå</div>
                     <div className="text-4xl md:text-6xl font-semibold">{items[currentIdx]?.label || '—'}</div>
@@ -240,8 +235,8 @@
                       <div className="text-lg text-neutral-700">Planlagt start: {plannedStartForIndex(currentIdx) || '—'}</div>
                     )}
                   </div>
-                  <div className="relative flex items-center justify-center" style={{width:240, height:240}}>
-                    <svg viewBox="0 0 240 240" width="240" height="240" className="block">
+                  <div className="relative flex items-center justify-center w-40 h-40 md:w-60 md:h-60">
+                    <svg viewBox="0 0 240 240" className="block w-full h-full">
                       {(() => { const R=96, CC=2*Math.PI*R; return (
                         <>
                           <circle cx="120" cy="120" r={R} stroke="currentColor" className="ring-bg" strokeWidth="14" fill="none"/>
@@ -252,24 +247,24 @@
                       ); })()}
                     </svg>
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-6xl md:text-7xl font-mono tabular-nums time-shadow">{formatClock(remaining)}</div>
+                      <div className="text-5xl md:text-7xl font-mono tabular-nums time-shadow">{formatClock(remaining)}</div>
                     </div>
                   </div>
                 </div>
-                <div className="p-6 rounded-2xl shadow bg-white flex flex-col gap-3 justify-between">
+                <div className="p-6 rounded-2xl shadow bg-white/90 flex flex-col gap-3 justify-between">
                   <div>
                     <div className="text-sm uppercase tracking-wide text-neutral-600">Neste</div>
                     <div className="text-2xl font-medium">{items[currentIdx+1]?.label || '—'}</div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {!running ? (
-                      <button onClick={start} className="px-4 py-3 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
+                      <button onClick={start} className="w-full md:w-auto px-4 py-3 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
                     ) : (
-                      <button onClick={pause} className="px-4 py-3 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
+                      <button onClick={pause} className="w-full md:w-auto px-4 py-3 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
                     )}
-                    <button onClick={nextItem} className="px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
-                    <button onClick={prevItem} className="px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
-                    <button onClick={reset} className="px-4 py-3 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
+                    <button onClick={nextItem} className="w-full md:w-auto px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
+                    <button onClick={prevItem} className="w-full md:w-auto px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
+                    <button onClick={reset} className="w-full md:w-auto px-4 py-3 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
                   </div>
                   <button onClick={()=>setScene(false)} className="px-3 py-2 rounded-xl bg-neutral-100">Lukk scene-modus</button>
                 </div>
@@ -279,9 +274,11 @@
         );
       }
 
+      /* ---- UI ---- */
       return (
         <div className="min-h-screen text-neutral-900 p-6">
           {scene && <SceneView/>}
+
           <div className="max-w-5xl mx-auto grid gap-6">
             {/* Topp: velg/administrer agenda */}
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
@@ -303,49 +300,7 @@
               </div>
             </div>
 
-            <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Agenda & Intervall‑Timer</h1>
-                <p className="text-sm text-neutral-600">Bygg sekvenser av blokker for møter, trening, undervisning m.m.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={meetingMode} onChange={e=>setMeetingMode(e.target.checked)} /> Møte‑modus
-                </label>
-                {meetingMode && (
-                  <input type="time" className="border rounded px-2 py-1" value={startTime} onChange={e=>setStartTime(e.target.value)} title="Planlagt møtestart" />
-                )}
-                <div className="flex items-center gap-2 text-sm">
-                  <span>Volum</span>
-                  <input type="range" min={0} max={1} step={0.05} value={volume} onChange={e=>setVolume(parseFloat(e.target.value))} />
-                </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={muted} onChange={e=>setMuted(e.target.checked)} /> Lydløs
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={vibrateOn} onChange={e=>setVibrateOn(e.target.checked)} /> Vibrasjon
-                </label>
-                <button onClick={()=>setScene(true)} className="px-3 py-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200">Scene-modus</button>
-                {/* Eksporter/Importer aktiv agenda */}
-                <button onClick={() => {
-                  const data = { meetingMode, startTime, items, name: active?.name };
-                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob); const a = document.createElement('a');
-                  a.href = url; a.download = `agenda_${(active?.name||'ukjent').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.json`; a.click();
-                  URL.revokeObjectURL(url);
-                }} className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white hover:opacity-90">Eksporter</button>
-                <label className="px-3 py-1.5 rounded-lg bg-neutral-200 hover:bg-neutral-300 cursor-pointer">
-                  Importer
-                  <input type="file" accept="application/json" className="hidden" onChange={(evt)=>{
-                    const file = evt.target.files?.[0]; if (!file) return; const reader = new FileReader();
-                    reader.onload = () => { try { const data = JSON.parse(String(reader.result)); setMeetingMode(!!data.meetingMode); setStartTime(data.startTime||''); setItems(Array.isArray(data.items)?data.items:items); } catch { alert('Kunne ikke lese filen'); } };
-                    reader.readAsText(file);
-                  }} />
-                </label>
-              </div>
-            </header>
-
-            {/* Nå: sirkel-nedtelling */}
+            {/* Nå-kort */}
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="sm:col-span-2 p-5 rounded-2xl shadow bg-white flex items-center justify-between" style={{background: (items[currentIdx]?.color || 'white')}}>
                 <div>
@@ -355,12 +310,12 @@
                     <div className="text-sm text-neutral-700">Planlagt start: {plannedStartForIndex(currentIdx) || '—'}</div>
                   )}
                 </div>
-                <div className="relative flex items-center justify-center" style={{width:140, height:140}}>
-                  <svg viewBox="0 0 140 140" width="140" height="140" className="block">
-                    <circle cx="70" cy="70" r={r} stroke="currentColor" className="ring-bg" strokeWidth="10" fill="none"/>
-                    <circle cx="70" cy="70" r={r} stroke="currentColor" strokeWidth="10" fill="none"
+                <div className="relative flex items-center justify-center w-28 h-28 sm:w-36 sm:h-36">
+                  <svg viewBox="0 0 140 140" className="block w-full h-full">
+                    <circle cx="70" cy="70" r={56} stroke="currentColor" className="ring-bg" strokeWidth="10" fill="none"/>
+                    <circle cx="70" cy="70" r={56} stroke="currentColor" strokeWidth="10" fill="none"
                       strokeLinecap="round"
-                      style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', strokeDasharray: C, strokeDashoffset: C * (1 - dash) }}
+                      style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', strokeDasharray: 2*Math.PI*56, strokeDashoffset: (2*Math.PI*56) * (1 - Math.max(0, Math.min(1, (currentDur>0 ? (currentDur-remaining)/currentDur : 0)))) }}
                     />
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -368,25 +323,28 @@
                   </div>
                 </div>
               </div>
+
               <div className="p-5 rounded-2xl shadow bg-white flex flex-col justify-between">
                 <div>
                   <div className="text-sm uppercase tracking-wide text-neutral-600">Neste</div>
                   <div className="text-lg font-medium">{items[currentIdx+1]?.label || '—'}</div>
                 </div>
-                <div className="text-sm text-neutral-700">Totalt: {formatClock(totalSeconds)}<br/>Gått: {formatClock(elapsedSeconds)}</div>
+                <div className="text-sm text-neutral-700">
+                  Totalt: {formatClock(totalSeconds)}<br/>Gått: {formatClock(elapsedSeconds)}
+                </div>
               </div>
             </div>
 
             {/* Kontroller */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center md:gap-3">
               {!running ? (
-                <button onClick={start} className="px-4 py-2 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
+                <button onClick={start} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
               ) : (
-                <button onClick={pause} className="px-4 py-2 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
+                <button onClick={pause} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
               )}
-              <button onClick={prevItem} className="px-4 py-2 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
-              <button onClick={nextItem} className="px-4 py-2 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
-              <button onClick={reset} className="px-4 py-2 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
+              <button onClick={prevItem} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
+              <button onClick={nextItem} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
+              <button onClick={reset} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
             </div>
 
             {/* Editor */}
@@ -397,20 +355,22 @@
               </div>
               <div className="grid gap-2">
                 {items.map((it, idx) => (
-                  <div key={it.id} className="grid grid-cols-12 gap-2 items-center p-3 rounded-xl bg-white shadow">
-                    <div className="col-span-3"><input className="w-full border rounded px-2 py-1" value={it.label} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,label:e.target.value}:x))} /></div>
-                    <div className="col-span-3 flex items-center gap-2">
-                      <label className="text-sm">Min</label>
-                      <input type="number" min={0} className="w-20 border rounded px-2 py-1" value={it.minutes} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,minutes:clampNum(e.target.value,0,999)}:x))} />
-                      <label className="text-sm">Sek</label>
-                      <input type="number" min={0} max={59} className="w-20 border rounded px-2 py-1" value={it.seconds} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,seconds:clampNum(e.target.value,0,59)}:x))} />
+                  <div key={it.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-2 items-center p-3 rounded-xl bg-white shadow">
+                    <div className="col-span-12 md:col-span-3 w-full">
+                      <input className="w-full border rounded px-2 py-1" value={it.label} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,label:e.target.value}:x))} />
                     </div>
-                    <div className="col-span-3 flex items-center gap-2">
+                    <div className="col-span-12 md:col-span-3 flex flex-wrap items-center gap-2">
+                      <label className="text-sm">Min</label>
+                      <input type="number" min={0} className="w-14 md:w-16 border rounded px-2 py-1" value={it.minutes} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,minutes:clampNum(e.target.value,0,999)}:x))} />
+                      <label className="text-sm">Sek</label>
+                      <input type="number" min={0} max={59} className="w-14 md:w-16 border rounded px-2 py-1" value={it.seconds} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,seconds:clampNum(e.target.value,0,59)}:x))} />
+                    </div>
+                    <div className="col-span-12 md:col-span-3 flex flex-wrap items-center gap-2">
                       <label className="text-sm">Farge</label>
-                      <input type="color" value={it.color} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,color:e.target.value}:x))} />
+                      <input type="color" className="h-8 w-8" value={it.color} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,color:e.target.value}:x))} />
                       {meetingMode && (<span className="text-xs text-neutral-600">Start: {plannedStartForIndex(idx) || '—'}</span>)}
                     </div>
-                    <div className="col-span-3 flex items-center justify-end gap-2">
+                    <div className="col-span-12 md:col-span-3 flex flex-wrap items-center justify-start md:justify-end gap-2">
                       <button onClick={()=>setItems(list=>{const i=list.findIndex(x=>x.id===it.id); if(i<=0)return list; const copy=[...list]; const [sp]=copy.splice(i,1); copy.splice(i-1,0,sp); return copy;})} className="px-2 py-1 rounded bg-neutral-200">↑</button>
                       <button onClick={()=>setItems(list=>{const i=list.findIndex(x=>x.id===it.id); if(i<0||i>=list.length-1)return list; const copy=[...list]; const [sp]=copy.splice(i,1); copy.splice(i+1,0,sp); return copy;})} className="px-2 py-1 rounded bg-neutral-200">↓</button>
                       <button onClick={()=>setItems(list=>list.filter(x=>x.id!==it.id))} className="px-2 py-1 rounded bg-red-500 text-white">Slett</button>
@@ -420,8 +380,8 @@
               </div>
             </div>
 
-            <footer className="text-xs text-neutral-600 pt-1">
-              Tips: Slå på Møte‑modus for beregnede klokkeslett. Lyd/vibrasjon krever først et klikk og støttes ikke på alle telefoner (iOS kan begrense vibrasjon i nettleser). Alle agendaer lagres lokalt i nettleseren din.
+            <footer className="text-xs text-neutral-600 pt-1 hidden sm:block">
+              Tips: Slå på Møte-modus for beregnede klokkeslett. Lyd/vibrasjon krever først et klikk og støttes ikke på alle telefoner (iOS kan begrense vibrasjon i nettleser). Alle agendaer lagres lokalt i nettleseren din.
             </footer>
           </div>
         </div>
