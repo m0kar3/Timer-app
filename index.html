@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agenda & Intervall‑Timer</title>
+  <title>Agenda & Intervall-Timer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://unpkg.com" />
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -12,7 +12,7 @@
   <style>
     .ring-bg { stroke-opacity: .15 }
     .time-shadow { text-shadow: 0 1px 0 rgba(0,0,0,.04); }
-    .scene-backdrop { position: fixed; inset: 0; background: white; z-index: 50; }
+    .scene-backdrop { position: fixed; inset: 0; z-index: 50; }
   </style>
 </head>
 <body class="bg-neutral-50">
@@ -21,257 +21,188 @@
   <script type="text/babel">
     const { useEffect, useMemo, useRef, useState } = React;
 
-    function uuid() {
-      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-      return 'id-' + Math.random().toString(36).slice(2) + Date.now();
+    /* ---- Hjelpere ---- */
+    function uuid(){ if (crypto?.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2)+Date.now(); }
+    function formatClock(s){ s=Math.max(0,Math.round(s||0)); const mm=String(Math.floor(s/60)).padStart(2,'0'); const ss=String(s%60).padStart(2,'0'); return `${mm}:${ss}`; }
+    function clampNum(v,min,max){ const n=Math.max(min,Math.floor(Number(v)||0)); return typeof max==='number'?Math.min(n,max):n; }
+    const audioCtxRefGlobal={current:null};
+    function ensureAudio(){ try{ if(!audioCtxRefGlobal.current){ const C=window.AudioContext||window.webkitAudioContext; audioCtxRefGlobal.current=new C(); } return audioCtxRefGlobal.current; }catch{ return null; } }
+    function beep(f=440,d=120,vol=0.7){ try{ const ctx=ensureAudio(); if(!ctx) return; const o=ctx.createOscillator(), g=ctx.createGain(); o.type='sine'; o.frequency.value=f; g.gain.value=vol; o.connect(g); g.connect(ctx.destination); o.start(); setTimeout(()=>{o.stop();g.disconnect();},d);}catch{} }
+    function vibrate(p){ try{ navigator.vibrate?.(p);}catch{} }
+    function toSeconds(it){ return (Number(it?.minutes)||0)*60 + (Number(it?.seconds)||0); }
+    function getContrastColor(hex){
+      try{
+        const h = hex.replace('#','');
+        const r = parseInt(h.substring(0,2),16),
+              g = parseInt(h.substring(2,4),16),
+              b = parseInt(h.substring(4,6),16);
+        const luma = 0.2126*r + 0.7152*g + 0.0722*b;
+        return luma > 150 ? '#111' : '#fff';
+      }catch{ return '#111'; }
     }
 
-    function formatClock(totalSeconds) {
-      const s = Math.max(0, Math.round(totalSeconds || 0));
-      const mm = String(Math.floor(s / 60)).padStart(2, '0');
-      const ss = String(s % 60).padStart(2, '0');
-      return `${mm}:${ss}`;
-    }
-    function clampNum(v, min, max) {
-      const n = Math.max(min, Math.floor(Number(v) || 0));
-      return typeof max === 'number' ? Math.min(n, max) : n;
-    }
-
-    // Delt AudioContext for pip-lyd
-    const audioCtxRefGlobal = { current: null };
-    function ensureAudio() {
-      try {
-        if (!audioCtxRefGlobal.current) {
-          const Ctx = window.AudioContext || window.webkitAudioContext;
-          audioCtxRefGlobal.current = new Ctx();
-        }
-        return audioCtxRefGlobal.current;
-      } catch { return null; }
-    }
-    function beep(freq = 440, duration = 120, volume = 0.7) {
-      try {
-        const ctx = ensureAudio(); if (!ctx) return;
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'sine'; o.frequency.value = freq;
-        g.gain.value = volume; o.connect(g); g.connect(ctx.destination);
-        o.start();
-        setTimeout(() => { o.stop(); g.disconnect(); }, duration);
-      } catch {}
-    }
-    function vibrate(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {} }
-    function toSeconds(it) { return (Number(it?.minutes)||0)*60 + (Number(it?.seconds)||0); }
-
-    function App() {
-      // ===== Agendebok (flere møter/agendaer) =====
-      const [agendas, setAgendas] = useState(() => {
-        try {
-          const saved = JSON.parse(localStorage.getItem('ait-agendas')||'null');
-          if (Array.isArray(saved) && saved.length) return saved;
-        } catch {}
-        let legacyItems = null;
-        try { legacyItems = JSON.parse(localStorage.getItem('ait-items')||'null'); } catch {}
+    /* ---- App ---- */
+    function App(){
+      // Flere agendaer
+      const [agendas,setAgendas]=useState(()=>{
+        try{ const saved=JSON.parse(localStorage.getItem('ait-agendas')||'null'); if(Array.isArray(saved)&&saved.length) return saved; }catch{}
+        let legacy=null; try{ legacy=JSON.parse(localStorage.getItem('ait-items')||'null'); }catch{}
         return [{
-          id: uuid(),
-          name: 'Min agenda',
-          meetingMode: false,
-          startTime: '',
-          items: legacyItems && legacyItems.length ? legacyItems : [
-            { id: uuid(), label: 'Oppstart', minutes: 0, seconds: 30, color: '#fde68a' },
-            { id: uuid(), label: 'Sak 1', minutes: 0, seconds: 45, color: '#bbf7d0' },
-            { id: uuid(), label: 'Pause', minutes: 0, seconds: 15, color: '#bfdbfe' },
-            { id: uuid(), label: 'Evaluering', minutes: 0, seconds: 30, color: '#fca5a5' },
+          id:uuid(), name:'Min agenda', meetingMode:false, startTime:'',
+          items: legacy?.length?legacy:[
+            {id:uuid(),label:'Oppstart',minutes:0,seconds:30,color:'#fde68a'},
+            {id:uuid(),label:'Sak 1',minutes:0,seconds:45,color:'#bbf7d0'},
+            {id:uuid(),label:'Pause',minutes:0,seconds:15,color:'#bfdbfe'},
+            {id:uuid(),label:'Evaluering',minutes:0,seconds:30,color:'#fca5a5'},
           ]
         }];
       });
-      const [activeAgendaId, setActiveAgendaId] = useState(() => agendas[0]?.id);
+      const [activeAgendaId,setActiveAgendaId]=useState(()=>agendas[0]?.id);
+      const active = useMemo(()=>agendas.find(a=>a.id===activeAgendaId)||agendas[0],[agendas,activeAgendaId]);
 
-      const active = useMemo(() => agendas.find(a => a.id === activeAgendaId) || agendas[0], [agendas, activeAgendaId]);
-      const [items, setItems] = useState(active?.items || []);
-      const [meetingMode, setMeetingMode] = useState(!!active?.meetingMode);
-      const [startTime, setStartTime] = useState(active?.startTime || '');
+      const [items,setItems]=useState(active?.items||[]);
+      const [meetingMode,setMeetingMode]=useState(!!active?.meetingMode);
+      const [startTime,setStartTime]=useState(active?.startTime||'');
 
-      useEffect(() => {
-        setItems(active?.items || []);
-        setMeetingMode(!!active?.meetingMode);
-        setStartTime(active?.startTime || '');
-        setCurrentIdx(0);
-      }, [activeAgendaId]);
+      useEffect(()=>{ setItems(active?.items||[]); setMeetingMode(!!active?.meetingMode); setStartTime(active?.startTime||''); setCurrentIdx(0); },[activeAgendaId]);
 
-      function saveAgendas(nextAgendas) {
-        setAgendas(nextAgendas);
-        try { localStorage.setItem('ait-agendas', JSON.stringify(nextAgendas)); } catch {}
-      }
+      function saveAgendas(next){ setAgendas(next); try{ localStorage.setItem('ait-agendas',JSON.stringify(next)); }catch{} }
+      useEffect(()=>{ const next=agendas.map(a=>a.id===activeAgendaId?{...a,items,meetingMode,startTime}:a); saveAgendas(next); try{ localStorage.setItem('ait-items',JSON.stringify(items)); }catch{} },[items,meetingMode,startTime]);
 
-      useEffect(() => {
-        const next = agendas.map(a => a.id === activeAgendaId ? { ...a, items, meetingMode, startTime } : a);
-        saveAgendas(next);
-        try { localStorage.setItem('ait-items', JSON.stringify(items)); } catch {}
-      }, [items, meetingMode, startTime]);
+      // Timer
+      const [currentIdx,setCurrentIdx]=useState(0);
+      const [remaining,setRemaining]=useState(()=>toSeconds((active?.items||[])[0]));
+      const [running,setRunning]=useState(false);
+      const [volume,setVolume]=useState(0.7);
+      const [vibrateOn,setVibrateOn]=useState(true);
+      const [muted,setMuted]=useState(false);
 
-      // ===== Timer (deadline-basert + sperre for dobbel next) =====
-      const [currentIdx, setCurrentIdx] = useState(0);
-      const [remaining, setRemaining] = useState(() => toSeconds((active?.items||[])[0]));
-      const [running, setRunning] = useState(false);
-      const [volume, setVolume] = useState(0.7);
-      const [vibrateOn, setVibrateOn] = useState(true);
-      const [muted, setMuted] = useState(false);
-      const [scene, setScene] = useState(false);
+      // Scene-modus
+      const [scene,setScene]=useState(false);
+      const [sceneStyle,setSceneStyle]=useState('classic'); // 'classic' | 'minimal'
 
-      const deadlineRef = useRef(null);   // ms timestamp
-      const advancingRef = useRef(false); // sperre
+      // Autosynk
+      const [autoSync,setAutoSync]=useState(false);
+      const syncWithClock = meetingMode && startTime && autoSync;
 
-      function startBlockForIndex(idx) {
-        const dur = toSeconds(items[idx] || { minutes:0, seconds:0 });
-        const now = performance.now();
-        deadlineRef.current = now + dur * 1000;
-        setRemaining(dur);
-        advancingRef.current = false;
-      }
-      useEffect(() => { startBlockForIndex(currentIdx); }, [currentIdx, items]);
+      // Deadline-loop
+      const deadlineRef=useRef(null), advancingRef=useRef(false);
+      function startBlockForIndex(idx){ const dur=toSeconds(items[idx]||{minutes:0,seconds:0}); const now=performance.now(); deadlineRef.current=now+dur*1000; setRemaining(dur); advancingRef.current=false; }
+      useEffect(()=>{ startBlockForIndex(currentIdx); },[currentIdx,items]);
 
-      useEffect(() => {
-        if (!running) return;
+      useEffect(()=>{
+        if (syncWithClock || !running) return;
         let raf;
-        const loop = () => {
-          const now = performance.now();
-          const msLeft = Math.max(0, (deadlineRef.current ?? now) - now);
-          const nextRem = msLeft / 1000;
-          setRemaining(nextRem);
-          if (nextRem === 0 && !advancingRef.current) {
-            advancingRef.current = true;
-            if (!muted && volume > 0) beep(440, 140, volume);
-            if (vibrateOn) vibrate([120,60,120]);
-            setTimeout(() => setCurrentIdx(i => Math.min(items.length - 1, i + 1)), 0);
+        const loop=()=>{ const now=performance.now(); const ms=Math.max(0,(deadlineRef.current??now)-now); const next=ms/1000; setRemaining(next);
+          if(next===0 && !advancingRef.current){
+            advancingRef.current=true;
+            if(!muted && volume>0) beep(440,140,volume);
+            if(vibrateOn) vibrate([120,60,120]);
+            setTimeout(()=>setCurrentIdx(i=>Math.min(items.length-1,i+1)),0);
           }
-          raf = requestAnimationFrame(loop);
+          raf=requestAnimationFrame(loop);
         };
-        raf = requestAnimationFrame(loop);
-        return () => cancelAnimationFrame(raf);
-      }, [running, volume, vibrateOn, muted, items.length]);
+        raf=requestAnimationFrame(loop); return ()=>cancelAnimationFrame(raf);
+      },[running,volume,vibrateOn,muted,items.length,syncWithClock]);
 
-      function start() {
-        const now = performance.now();
-        deadlineRef.current = now + Math.max(0, remaining) * 1000;
-        advancingRef.current = false;
-        setRunning(true);
-      }
-      function pause() { setRunning(false); }
-      function reset() { setRunning(false); setCurrentIdx(0); startBlockForIndex(0); }
-      function nextItem() { setCurrentIdx(i => Math.min(items.length - 1, i + 1)); }
-      function prevItem() { setCurrentIdx(i => Math.max(0, i - 1)); }
+      function start(){ if (autoSync) setAutoSync(false); const now=performance.now(); deadlineRef.current=now+Math.max(0,remaining)*1000; advancingRef.current=false; setRunning(true); }
+      function pause(){ if (autoSync) setAutoSync(false); setRunning(false); }
+      function reset(){ if (autoSync) setAutoSync(false); setRunning(false); setCurrentIdx(0); startBlockForIndex(0); }
+      function nextItem(){ if (autoSync) setAutoSync(false); setCurrentIdx(i=>Math.min(items.length-1,i+1)); }
+      function prevItem(){ if (autoSync) setAutoSync(false); setCurrentIdx(i=>Math.max(0,i-1)); }
 
-      const totalSeconds = useMemo(() => items.reduce((s, it) => s + toSeconds(it), 0), [items]);
-      const elapsedSeconds = useMemo(() => {
-        const before = items.slice(0, currentIdx).reduce((s, it) => s + toSeconds(it), 0);
-        return before + (toSeconds(items[currentIdx]) - remaining);
-      }, [items, currentIdx, remaining]);
+      // Summaries
+      const totalSeconds = useMemo(()=>items.reduce((s,it)=>s+toSeconds(it),0),[items]);
+      const elapsedSeconds = useMemo(()=>{ const before=items.slice(0,currentIdx).reduce((s,it)=>s+toSeconds(it),0); return before + (toSeconds(items[currentIdx]) - remaining); },[items,currentIdx,remaining]);
 
-      const currentDur = toSeconds(items[currentIdx] || {minutes:0,seconds:0});
-      const progress = currentDur > 0 ? (currentDur - remaining) / currentDur : 0;
-      const r = 56; const C = 2 * Math.PI * r;
-      const dash = Math.max(0, Math.min(1, progress));
+      const currentDur = toSeconds(items[currentIdx]||{minutes:0,seconds:0});
+      const progress = currentDur>0 ? (currentDur-remaining)/currentDur : 0;
+      const r=56, C=2*Math.PI*r, dash=Math.max(0,Math.min(1,progress));
 
-      function plannedStartForIndex(idx) {
-        if (!meetingMode || !startTime) return null;
-        const [h, m] = startTime.split(':').map(Number);
-        const base = new Date(); base.setHours(h||0, m||0, 0, 0);
-        let offset = 0; for (let i=0;i<idx;i++) offset += toSeconds(items[i]);
-        const d = new Date(base.getTime() + offset * 1000);
-        return d.toTimeString().slice(0,5);
+      function plannedStartForIndex(idx){
+        if(!meetingMode || !startTime) return null;
+        const [h,m]=startTime.split(':').map(Number);
+        const base=new Date(); base.setHours(h||0,m||0,0,0);
+        let off=0; for(let i=0;i<idx;i++) off+=toSeconds(items[i]);
+        const d=new Date(base.getTime()+off*1000); return d.toTimeString().slice(0,5);
       }
 
-      // ===== Agendahåndtering =====
-      function newAgenda() {
-        const name = prompt('Navn på ny agenda?', 'Ny agenda');
-        if (!name) return;
-        const a = { id: uuid(), name, meetingMode: false, startTime: '', items: [] };
-        const next = [...agendas, a]; saveAgendas(next); setActiveAgendaId(a.id);
-      }
-      function renameAgenda() {
-        const name = prompt('Nytt navn for agenda:', active?.name || '');
-        if (!name) return;
-        saveAgendas(agendas.map(a => a.id === activeAgendaId ? { ...a, name } : a));
-      }
-      function saveAsAgenda() {
-        const name = prompt('Lagre som… Navn på kopi:', (active?.name || 'Agenda') + ' (kopi)');
-        if (!name) return;
-        const a = { id: uuid(), name, meetingMode, startTime, items };
-        const next = [...agendas, a]; saveAgendas(next); setActiveAgendaId(a.id);
-      }
-      function deleteAgenda() {
-        if (!active) return;
-        if (!confirm(`Slette "${active.name}"?`)) return;
-        const next = agendas.filter(a => a.id !== activeAgendaId);
-        if (!next.length) {
-          const fresh = { id: uuid(), name: 'Ny agenda', meetingMode: false, startTime: '', items: [] };
-          saveAgendas([fresh]); setActiveAgendaId(fresh.id);
-        } else {
-          saveAgendas(next); setActiveAgendaId(next[0].id);
-        }
-      }
-      function exportAll() {
-        const blob = new Blob([JSON.stringify(agendas, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `agendebok_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
-      }
-      function importAll(evt) {
-        const file = evt.target.files?.[0]; if (!file) return;
-        const reader = new FileReader(); reader.onload = () => {
-          try {
-            const data = JSON.parse(String(reader.result));
-            if (Array.isArray(data) && data.length) { saveAgendas(data); setActiveAgendaId(data[0].id); }
-            else alert('Filen inneholder ikke en gyldig agendebok');
-          } catch { alert('Kunne ikke lese filen'); }
-        }; reader.readAsText(file);
-      }
+      // Autosynk helpers/effect
+      function buildSchedule(arr){ const offsets=[]; let acc=0; for(const it of arr){ const dur=(+it.minutes||0)*60+(+it.seconds||0); offsets.push({start:acc,end:acc+dur}); acc+=dur; } return {offsets,total:acc}; }
+      useEffect(()=>{
+        if (!syncWithClock || !items.length) return;
+        const [h,m]=String(startTime||'0:0').split(':').map(Number);
+        const base=new Date(); base.setHours(h||0,m||0,0,0);
+        const {offsets,total}=buildSchedule(items);
+        const tick=()=>{
+          const since = Math.floor((Date.now()-base.getTime())/1000);
+          if (since<0){ setCurrentIdx(0); const d=offsets[0]?.end-offsets[0]?.start||0; setRemaining(d); setRunning(false); return; }
+          if (since>=total){ setCurrentIdx(Math.max(0,items.length-1)); setRemaining(0); setRunning(false); return; }
+          const i = offsets.findIndex(seg=>since>=seg.start && since<seg.end);
+          const idx = i<0?0:i; const seg=offsets[idx]; const rem=Math.max(0, seg.end - since);
+          setCurrentIdx(idx); setRemaining(rem); setRunning(true);
+        };
+        const id=setInterval(tick,500); tick(); return ()=>clearInterval(id);
+      },[syncWithClock,items,startTime]);
 
-      // ===== Scene-modus =====
-      function SceneView() {
+      /* ---- Scene: CLASSIC (ryddet og nedskalert) ---- */
+      function SceneClassic(){
+        const bg=items[currentIdx]?.color||'#ffffff';
         return (
-          <div className="scene-backdrop p-6">
+          <div className="scene-backdrop p-6" style={{background:bg}}>
             <div className="max-w-6xl mx-auto h-full grid place-items-center">
-              <div className="w-full grid md:grid-cols-3 gap-6 items-center">
-                <div className="md:col-span-2 p-6 rounded-2xl shadow bg-white flex items-center justify-between" style={{background:(items[currentIdx]?.color||'white')}}>
-                  <div>
-                    <div className="text-sm uppercase tracking-wide text-neutral-600">Nå</div>
-                    <div className="text-4xl md:text-6xl font-semibold">{items[currentIdx]?.label || '—'}</div>
+              <div className="w-full grid md:grid-cols-3 gap-6 items-stretch">
+                {/* Kort: Nå */}
+                <div className="md:col-span-2 p-6 rounded-2xl shadow bg-white/90 flex items-center gap-6">
+                  {/* Tekstside */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs uppercase tracking-wide text-neutral-600">Nå</div>
+                    <div className="text-2xl md:text-3xl font-semibold leading-snug break-words">
+                      {items[currentIdx]?.label || '—'}
+                    </div>
                     {meetingMode && startTime && (
-                      <div className="text-lg text-neutral-700">Planlagt start: {plannedStartForIndex(currentIdx) || '—'}</div>
+                      <div className="text-sm text-neutral-700 mt-1">
+                        Planlagt start: {plannedStartForIndex(currentIdx) || '—'}
+                      </div>
                     )}
                   </div>
-                  <div className="relative flex items-center justify-center" style={{width:240, height:240}}>
-                    <svg viewBox="0 0 240 240" width="240" height="240" className="block">
-                      {(() => { const R=96, CC=2*Math.PI*R; return (
-                        <>
-                          <circle cx="120" cy="120" r={R} stroke="currentColor" className="ring-bg" strokeWidth="14" fill="none"/>
-                          <circle cx="120" cy="120" r={R} stroke="currentColor" strokeWidth="14" fill="none"
-                            strokeLinecap="round"
-                            style={{ transform:'rotate(-90deg)', transformOrigin:'50% 50%', strokeDasharray: CC, strokeDashoffset: CC*(1-dash) }} />
-                        </>
-                      ); })()}
+
+                  {/* Sirkel – separat kolonne (hindrer overlap) */}
+                  <div className="relative flex items-center justify-center shrink-0 min-w-[128px] w-36 h-36 md:w-48 md:h-48">
+                    <svg viewBox="0 0 240 240" className="block w-full h-full">
+                      {(()=>{ const R=96,CC=2*Math.PI*R; return(<>
+                        <circle cx="120" cy="120" r={R} stroke="currentColor" className="ring-bg" strokeWidth="12" fill="none"/>
+                        <circle cx="120" cy="120" r={R} stroke="currentColor" strokeWidth="12" fill="none" strokeLinecap="round"
+                          style={{transform:'rotate(-90deg)',transformOrigin:'50% 50%',strokeDasharray:CC,strokeDashoffset:CC*(1-dash)}}/>
+                      </>); })()}
                     </svg>
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-6xl md:text-7xl font-mono tabular-nums time-shadow">{formatClock(remaining)}</div>
+                      <div className="text-3xl md:text-4xl font-mono tabular-nums time-shadow">
+                        {formatClock(remaining)}
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="p-6 rounded-2xl shadow bg-white flex flex-col gap-3 justify-between">
+
+                {/* Kort: Neste + kontroller */}
+                <div className="p-6 rounded-2xl shadow bg-white/90 flex flex-col gap-3 justify-between">
                   <div>
-                    <div className="text-sm uppercase tracking-wide text-neutral-600">Neste</div>
-                    <div className="text-2xl font-medium">{items[currentIdx+1]?.label || '—'}</div>
+                    <div className="text-xs uppercase tracking-wide text-neutral-600">Neste</div>
+                    <div className="text-base md:text-lg font-medium">
+                      {items[currentIdx+1]?.label || '—'}
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    {!running ? (
-                      <button onClick={start} className="px-4 py-3 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
-                    ) : (
-                      <button onClick={pause} className="px-4 py-3 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
+                    {!running?(
+                      <button onClick={start} className="px-4 py-2 rounded-xl bg-green-600 text-white">Start</button>
+                    ):(
+                      <button onClick={pause} className="px-4 py-2 rounded-xl bg-yellow-500 text-white">Pause</button>
                     )}
-                    <button onClick={nextItem} className="px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
-                    <button onClick={prevItem} className="px-4 py-3 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
-                    <button onClick={reset} className="px-4 py-3 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
+                    <button onClick={nextItem} className="px-4 py-2 rounded-xl bg-neutral-200">Neste</button>
+                    <button onClick={prevItem} className="px-4 py-2 rounded-xl bg-neutral-200">Forrige</button>
+                    <button onClick={reset} className="px-4 py-2 rounded-xl bg-neutral-800 text-white">Nullstill</button>
                   </div>
-                  <button onClick={()=>setScene(false)} className="px-3 py-2 rounded-xl bg-neutral-100">Lukk scene-modus</button>
+                  <button onClick={()=>setScene(false)} className="px-3 py-2 rounded-xl bg-neutral-100">Lukk</button>
                 </div>
               </div>
             </div>
@@ -279,140 +210,209 @@
         );
       }
 
+      /* ---- Scene: MINIMAL (beholdt slik du liker den) ---- */
+      function SceneMinimal(){
+        const bg = items[currentIdx]?.color || '#ffffff';
+        const text = getContrastColor(bg);
+        const subtext = text === '#fff' ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.7)';
+        const dotsActive = Array.from({length: items.length}, (_,i)=> i < currentIdx ? '●' : i===currentIdx ? '◉' : '○');
+        const nowStr = new Date().toTimeString().slice(0,5);
+
+        const currentDur = toSeconds(items[currentIdx]||{minutes:0,seconds:0});
+        const progress = currentDur>0 ? (currentDur-remaining)/currentDur : 0;
+        const dash=Math.max(0,Math.min(1,progress));
+
+        return (
+          <div className="scene-backdrop" style={{background:bg, color:text}}>
+            <div className="h-full max-w-6xl mx-auto p-6 md:p-10">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
+                {/* Venstre: stor sirkel */}
+                <div className="flex items-center justify-center">
+                  <div className="relative w-48 h-48 sm:w-56 sm:h-56 md:w-72 md:h-72">
+                    <svg viewBox="0 0 240 240" className="block w-full h-full">
+                      {(()=>{ const R=96,CC=2*Math.PI*R; return(<>
+                        <circle cx="120" cy="120" r={R} stroke={subtext} className="ring-bg" strokeWidth="16" fill="none"/>
+                        <circle cx="120" cy="120" r={R} stroke={text} strokeWidth="16" fill="none" strokeLinecap="round"
+                          style={{transform:'rotate(-90deg)',transformOrigin:'50% 50%',strokeDasharray:CC,strokeDashoffset:CC*(1-dash)}}/>
+                      </>); })()}
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-3xl md:text-4xl font-mono tabular-nums" style={{textShadow:'0 1px 0 rgba(0,0,0,.05)'}}>{formatClock(remaining)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Høyre: klokke, dots, tekster og kontroller */}
+                <div className="flex flex-col h-full">
+                  <div className="flex items-baseline justify-between">
+                    <div className="text-3xl md:text-4xl font-semibold">{nowStr}</div>
+                    <div className="text-sm" style={{color:subtext}}>{currentIdx}/{items.length}</div>
+                  </div>
+
+                  <div className="mt-2 text-xl tracking-wider" aria-label="Progresjon">
+                    {dotsActive.join(' ')}
+                  </div>
+
+                  <div className="flex-1 flex flex-col justify-center">
+                    <div className="text-sm uppercase mb-1" style={{color:subtext}}>Nå</div>
+                    <div className="text-2xl md:text-3xl font-semibold leading-snug break-words">
+                      {items[currentIdx]?.label || '—'}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <div className="text-sm uppercase mb-1" style={{color:subtext}}>Neste</div>
+                    <div className="text-base md:text-lg opacity-80">
+                      {items[currentIdx+1]?.label || '—'}
+                    </div>
+                  </div>
+
+                  <div className="mt-auto pt-6">
+                    <div className="flex flex-wrap gap-3">
+                      {!running ? (
+                        <button onClick={start} className="px-4 py-2 rounded-full" style={{background:text,color:bg}}>Start</button>
+                      ) : (
+                        <button onClick={pause} className="px-4 py-2 rounded-full" style={{background:text,color:bg}}>Pause</button>
+                      )}
+                      <button onClick={prevItem} className="px-4 py-2 rounded-full border" style={{borderColor:subtext,color:text}}>Forrige</button>
+                      <button onClick={nextItem} className="px-4 py-2 rounded-full border" style={{borderColor:subtext,color:text}}>Neste</button>
+                      <button onClick={()=>setScene(false)} className="px-4 py-2 rounded-full border ml-auto" style={{borderColor:subtext,color:text}}>Lukk</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      /* ---- UI ---- */
       return (
         <div className="min-h-screen text-neutral-900 p-6">
-          {scene && <SceneView/>}
+          {scene && (sceneStyle==='minimal' ? <SceneMinimal/> : <SceneClassic/>)}
+
           <div className="max-w-5xl mx-auto grid gap-6">
             {/* Topp: velg/administrer agenda */}
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <label className="text-sm">Agenda:</label>
                 <select className="border rounded px-2 py-1" value={activeAgendaId} onChange={e=>setActiveAgendaId(e.target.value)}>
-                  {agendas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  {agendas.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
-                <button onClick={newAgenda} className="px-2 py-1 rounded bg-neutral-200">Ny</button>
-                <button onClick={renameAgenda} className="px-2 py-1 rounded bg-neutral-200">Gi nytt navn</button>
-                <button onClick={saveAsAgenda} className="px-2 py-1 rounded bg-neutral-200">Lagre som</button>
-                <button onClick={deleteAgenda} className="px-2 py-1 rounded bg-red-500 text-white">Slett</button>
+                <button onClick={()=>{ const name=prompt('Navn på ny agenda?','Ny agenda'); if(!name) return; const a={id:uuid(),name,meetingMode:false,startTime:'',items:[]}; const next=[...agendas,a]; saveAgendas(next); setActiveAgendaId(a.id); }} className="px-2 py-1 rounded bg-neutral-200">Ny</button>
+                <button onClick={()=>{ const name=prompt('Nytt navn for agenda:',active?.name||''); if(!name) return; saveAgendas(agendas.map(a=>a.id===activeAgendaId?{...a,name}:a)); }} className="px-2 py-1 rounded bg-neutral-200">Gi nytt navn</button>
+                <button onClick={()=>{ const name=prompt('Lagre som… Navn på kopi:',(active?.name||'Agenda')+' (kopi)'); if(!name) return; const a={id:uuid(),name,meetingMode, startTime, items}; const next=[...agendas,a]; saveAgendas(next); setActiveAgendaId(a.id); }} className="px-2 py-1 rounded bg-neutral-200">Lagre som</button>
+                <button onClick={()=>{ if(!active) return; if(!confirm(`Slette "${active.name}"?`)) return; const next=agendas.filter(a=>a.id!==activeAgendaId); if(!next.length){ const fresh={id:uuid(),name:'Ny agenda',meetingMode:false,startTime:'',items:[]}; saveAgendas([fresh]); setActiveAgendaId(fresh.id);} else { saveAgendas(next); setActiveAgendaId(next[0].id);} }} className="px-2 py-1 rounded bg-red-500 text-white">Slett</button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button onClick={exportAll} className="px-2 py-1 rounded bg-neutral-900 text-white">Eksporter alle</button>
+                <button onClick={()=>{ const blob=new Blob([JSON.stringify(agendas,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`agendebok_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="px-2 py-1 rounded bg-neutral-900 text-white">Eksporter alle</button>
                 <label className="px-2 py-1 rounded bg-neutral-200 cursor-pointer">Importer alle
-                  <input type="file" accept="application/json" className="hidden" onChange={importAll} />
+                  <input type="file" accept="application/json" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const d=JSON.parse(String(r.result)); if(Array.isArray(d)&&d.length){ saveAgendas(d); setActiveAgendaId(d[0].id);} else alert('Ugyldig fil'); }catch{ alert('Kunne ikke lese fil'); } }; r.readAsText(f); }} />
                 </label>
               </div>
             </div>
 
-            <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Agenda & Intervall‑Timer</h1>
-                <p className="text-sm text-neutral-600">Bygg sekvenser av blokker for møter, trening, undervisning m.m.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={meetingMode} onChange={e=>setMeetingMode(e.target.checked)} /> Møte‑modus
-                </label>
-                {meetingMode && (
-                  <input type="time" className="border rounded px-2 py-1" value={startTime} onChange={e=>setStartTime(e.target.value)} title="Planlagt møtestart" />
-                )}
-                <div className="flex items-center gap-2 text-sm">
-                  <span>Volum</span>
-                  <input type="range" min={0} max={1} step={0.05} value={volume} onChange={e=>setVolume(parseFloat(e.target.value))} />
-                </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={muted} onChange={e=>setMuted(e.target.checked)} /> Lydløs
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" className="h-4 w-4" checked={vibrateOn} onChange={e=>setVibrateOn(e.target.checked)} /> Vibrasjon
-                </label>
-                <button onClick={()=>setScene(true)} className="px-3 py-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200">Scene-modus</button>
-                {/* Eksporter/Importer aktiv agenda */}
-                <button onClick={() => {
-                  const data = { meetingMode, startTime, items, name: active?.name };
-                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob); const a = document.createElement('a');
-                  a.href = url; a.download = `agenda_${(active?.name||'ukjent').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.json`; a.click();
-                  URL.revokeObjectURL(url);
-                }} className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white hover:opacity-90">Eksporter</button>
-                <label className="px-3 py-1.5 rounded-lg bg-neutral-200 hover:bg-neutral-300 cursor-pointer">
-                  Importer
-                  <input type="file" accept="application/json" className="hidden" onChange={(evt)=>{
-                    const file = evt.target.files?.[0]; if (!file) return; const reader = new FileReader();
-                    reader.onload = () => { try { const data = JSON.parse(String(reader.result)); setMeetingMode(!!data.meetingMode); setStartTime(data.startTime||''); setItems(Array.isArray(data.items)?data.items:items); } catch { alert('Kunne ikke lese filen'); } };
-                    reader.readAsText(file);
-                  }} />
-                </label>
-              </div>
-            </header>
-
-            {/* Nå: sirkel-nedtelling */}
+            {/* Nå-kort */}
             <div className="grid gap-4 sm:grid-cols-3">
-              <div className="sm:col-span-2 p-5 rounded-2xl shadow bg-white flex items-center justify-between" style={{background: (items[currentIdx]?.color || 'white')}}>
-                <div>
+              <div className="sm:col-span-2 p-5 rounded-2xl shadow bg-white flex items-center justify-between" style={{background:(items[currentIdx]?.color||'white')}}>
+                <div className="min-w-0">
                   <div className="text-sm uppercase tracking-wide text-neutral-600">Nå</div>
-                  <div className="text-2xl sm:text-4xl font-semibold">{items[currentIdx]?.label || '—'}</div>
-                  {meetingMode && startTime && (
-                    <div className="text-sm text-neutral-700">Planlagt start: {plannedStartForIndex(currentIdx) || '—'}</div>
-                  )}
+                  <div className="text-2xl sm:text-4xl font-semibold break-words">{items[currentIdx]?.label||'—'}</div>
+                  {meetingMode && startTime && (<div className="text-sm text-neutral-700">Planlagt start: {plannedStartForIndex(currentIdx)||'—'}</div>)}
                 </div>
-                <div className="relative flex items-center justify-center" style={{width:140, height:140}}>
-                  <svg viewBox="0 0 140 140" width="140" height="140" className="block">
-                    <circle cx="70" cy="70" r={r} stroke="currentColor" className="ring-bg" strokeWidth="10" fill="none"/>
-                    <circle cx="70" cy="70" r={r} stroke="currentColor" strokeWidth="10" fill="none"
-                      strokeLinecap="round"
-                      style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', strokeDasharray: C, strokeDashoffset: C * (1 - dash) }}
-                    />
+                <div className="relative flex items-center justify-center w-28 h-28 sm:w-36 sm:h-36 shrink-0">
+                  <svg viewBox="0 0 140 140" className="block w-full h-full">
+                    <circle cx="70" cy="70" r="56" stroke="currentColor" className="ring-bg" strokeWidth="10" fill="none"/>
+                    <circle cx="70" cy="70" r="56" stroke="currentColor" strokeWidth="10" fill="none" strokeLinecap="round"
+                      style={{transform:'rotate(-90deg)',transformOrigin:'50% 50%',strokeDasharray:2*Math.PI*56,strokeDashoffset:(2*Math.PI*56)*(1-Math.max(0,Math.min(1,(currentDur>0?(currentDur-remaining)/currentDur:0))))}}/>
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="text-3xl sm:text-4xl font-mono tabular-nums time-shadow">{formatClock(remaining)}</div>
                   </div>
                 </div>
               </div>
+
               <div className="p-5 rounded-2xl shadow bg-white flex flex-col justify-between">
                 <div>
                   <div className="text-sm uppercase tracking-wide text-neutral-600">Neste</div>
-                  <div className="text-lg font-medium">{items[currentIdx+1]?.label || '—'}</div>
+                  <div className="text-lg font-medium">{items[currentIdx+1]?.label||'—'}</div>
                 </div>
                 <div className="text-sm text-neutral-700">Totalt: {formatClock(totalSeconds)}<br/>Gått: {formatClock(elapsedSeconds)}</div>
               </div>
             </div>
 
-            {/* Kontroller */}
+            {/* Kontroller + møte-modus */}
             <div className="flex flex-wrap items-center gap-3">
-              {!running ? (
-                <button onClick={start} className="px-4 py-2 rounded-2xl bg-green-600 text-white shadow hover:opacity-90">Start</button>
-              ) : (
-                <button onClick={pause} className="px-4 py-2 rounded-2xl bg-yellow-500 text-white shadow hover:opacity-90">Pause</button>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="h-4 w-4" checked={meetingMode} onChange={e=>setMeetingMode(e.target.checked)} /> Møte-modus
+              </label>
+              {meetingMode && (
+                <>
+                  <input type="time" className="border rounded px-2 py-1" value={startTime} onChange={e=>setStartTime(e.target.value)} title="Planlagt møtestart" />
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" className="h-4 w-4" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)} /> Følg klokka (auto)
+                  </label>
+                </>
               )}
-              <button onClick={prevItem} className="px-4 py-2 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Forrige</button>
-              <button onClick={nextItem} className="px-4 py-2 rounded-2xl bg-neutral-200 hover:bg-neutral-300">Neste</button>
-              <button onClick={reset} className="px-4 py-2 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
+              <div className="ml-auto grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center md:gap-3">
+                {!running ? (
+                  <button onClick={start} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-green-600 text-white shadow">Start</button>
+                ) : (
+                  <button onClick={pause} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-yellow-500 text-white shadow">Pause</button>
+                )}
+                <button onClick={prevItem} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-200">Forrige</button>
+                <button onClick={nextItem} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-200">Neste</button>
+                <button onClick={reset} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-800 text-white">Nullstill</button>
+                <button onClick={()=>{ setSceneStyle('classic'); setScene(true); }} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-100">Scene</button>
+                <button onClick={()=>{ setSceneStyle('minimal'); setScene(true); }} className="w-full md:w-auto px-4 py-2 rounded-2xl bg-neutral-100">Scene (minimal)</button>
+              </div>
+            </div>
+
+            {/* Lyd/vibrasjon + eksport/import aktiv agenda */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-sm">
+                <span>Volum</span>
+                <input type="range" min={0} max={1} step={0.05} value={volume} onChange={e=>setVolume(parseFloat(e.target.value))} />
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="h-4 w-4" checked={muted} onChange={e=>setMuted(e.target.checked)} /> Lydløs
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="h-4 w-4" checked={vibrateOn} onChange={e=>setVibrateOn(e.target.checked)} /> Vibrasjon
+              </label>
+              <button onClick={()=>setScene(true)} className="px-3 py-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200">Scene-modus</button>
+              <button onClick={()=>{ const data={meetingMode,startTime,items,name:active?.name}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`agenda_${(active?.name||'ukjent').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white">Eksporter</button>
+              <label className="px-3 py-1.5 rounded-lg bg-neutral-200 hover:bg-neutral-300 cursor-pointer">Importer
+                <input type="file" accept="application/json" className="hidden" onChange={(evt)=>{ const f=evt.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const d=JSON.parse(String(r.result)); setMeetingMode(!!d.meetingMode); setStartTime(d.startTime||''); setItems(Array.isArray(d.items)?d.items:items);}catch{ alert('Kunne ikke lese filen'); } }; r.readAsText(f); }} />
+              </label>
             </div>
 
             {/* Editor */}
             <div className="grid gap-3">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-semibold">Blokker</h2>
-                <button onClick={() => setItems(it => [...it, { id: uuid(), label: `Sak ${it.length + 1}`, minutes: 0, seconds: 30, color: '#e5e7eb' }])} className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white">Legg til blokk</button>
+                <button onClick={()=>setItems(it=>[...it,{id:uuid(),label:`Sak ${it.length+1}`,minutes:0,seconds:30,color:'#e5e7eb'}])} className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white">Legg til blokk</button>
               </div>
               <div className="grid gap-2">
-                {items.map((it, idx) => (
-                  <div key={it.id} className="grid grid-cols-12 gap-2 items-center p-3 rounded-xl bg-white shadow">
-                    <div className="col-span-3"><input className="w-full border rounded px-2 py-1" value={it.label} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,label:e.target.value}:x))} /></div>
-                    <div className="col-span-3 flex items-center gap-2">
+                {items.map((it,idx)=>(
+                  <div key={it.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-2 items-center p-3 rounded-xl bg-white shadow">
+                    <div className="col-span-12 md:col-span-3 w-full">
+                      <input className="w-full border rounded px-2 py-1" value={it.label} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,label:e.target.value}:x))} />
+                    </div>
+                    <div className="col-span-12 md:col-span-3 flex flex-wrap items-center gap-2">
                       <label className="text-sm">Min</label>
-                      <input type="number" min={0} className="w-20 border rounded px-2 py-1" value={it.minutes} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,minutes:clampNum(e.target.value,0,999)}:x))} />
+                      <input type="number" min={0} className="w-14 md:w-16 border rounded px-2 py-1" value={it.minutes} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,minutes:clampNum(e.target.value,0,999)}:x))} />
                       <label className="text-sm">Sek</label>
-                      <input type="number" min={0} max={59} className="w-20 border rounded px-2 py-1" value={it.seconds} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,seconds:clampNum(e.target.value,0,59)}:x))} />
+                      <input type="number" min={0} max={59} className="w-14 md:w-16 border rounded px-2 py-1" value={it.seconds} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,seconds:clampNum(e.target.value,0,59)}:x))} />
                     </div>
-                    <div className="col-span-3 flex items-center gap-2">
+                    <div className="col-span-12 md:col-span-3 flex flex-wrap items-center gap-2">
                       <label className="text-sm">Farge</label>
-                      <input type="color" value={it.color} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,color:e.target.value}:x))} />
-                      {meetingMode && (<span className="text-xs text-neutral-600">Start: {plannedStartForIndex(idx) || '—'}</span>)}
+                      <input type="color" className="h-8 w-8" value={it.color} onChange={e=>setItems(list=>list.map(x=>x.id===it.id?{...x,color:e.target.value}:x))} />
+                      {meetingMode && (<span className="text-xs text-neutral-600">Start: {plannedStartForIndex(idx)||'—'}</span>)}
                     </div>
-                    <div className="col-span-3 flex items-center justify-end gap-2">
-                      <button onClick={()=>setItems(list=>{const i=list.findIndex(x=>x.id===it.id); if(i<=0)return list; const copy=[...list]; const [sp]=copy.splice(i,1); copy.splice(i-1,0,sp); return copy;})} className="px-2 py-1 rounded bg-neutral-200">↑</button>
-                      <button onClick={()=>setItems(list=>{const i=list.findIndex(x=>x.id===it.id); if(i<0||i>=list.length-1)return list; const copy=[...list]; const [sp]=copy.splice(i,1); copy.splice(i+1,0,sp); return copy;})} className="px-2 py-1 rounded bg-neutral-200">↓</button>
+                    <div className="col-span-12 md:col-span-3 flex flex-wrap items-center justify-start md:justify-end gap-2">
+                      <button onClick={()=>setItems(list=>{const i=list.findIndex(x=>x.id===it.id); if(i<=0) return list; const copy=[...list]; const [sp]=copy.splice(i,1); copy.splice(i-1,0,sp); return copy;})} className="px-2 py-1 rounded bg-neutral-200">↑</button>
+                      <button onClick={()=>setItems(list=>{const i=list.findIndex(x=>x.id===it.id); if(i<0||i>=list.length-1) return list; const copy=[...list]; const [sp]=copy.splice(i,1); copy.splice(i+1,0,sp); return copy;})} className="px-2 py-1 rounded bg-neutral-200">↓</button>
                       <button onClick={()=>setItems(list=>list.filter(x=>x.id!==it.id))} className="px-2 py-1 rounded bg-red-500 text-white">Slett</button>
                     </div>
                   </div>
@@ -420,8 +420,8 @@
               </div>
             </div>
 
-            <footer className="text-xs text-neutral-600 pt-1">
-              Tips: Slå på Møte‑modus for beregnede klokkeslett. Lyd/vibrasjon krever først et klikk og støttes ikke på alle telefoner (iOS kan begrense vibrasjon i nettleser). Alle agendaer lagres lokalt i nettleseren din.
+            <footer className="text-xs text-neutral-600 pt-1 hidden sm:block">
+              Tips: Slå på Møte-modus for beregnede klokkeslett. Lyd/vibrasjon krever først et klikk og støttes ikke på alle telefoner (iOS kan begrense vibrasjon i nettleser). Alle agendaer lagres lokalt i nettleseren din.
             </footer>
           </div>
         </div>
